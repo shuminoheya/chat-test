@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Admin - 部屋作成</title>
+<style>
+body { font-family: sans-serif; margin:20px; background:#0f1223; color:#e8edf0; }
+input, button { margin:5px; padding:8px; border-radius:6px; }
+button { cursor:pointer; }
+</style>
+</head>
+<body>
+<h2>部屋作成</h2>
+<label>部屋名: <input type="text" id="roomName"></label><br>
+<label>パスワード: <input type="password" id="roomPass"></label><br>
+<button onclick="createRoom()">作成</button>
+<p id="info"></p>
+
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script>
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  databaseURL: "https://YOUR_PROJECT-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "YOUR_PROJECT",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+async function sha256(text){
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+
+async function createRoom(){
+  const name = document.getElementById("roomName").value.trim();
+  const pass = document.getElementById("roomPass").value;
+  if(!name || !pass){ document.getElementById("info").textContent="入力してください"; return; }
+  const passHash = await sha256(pass);
+  await db.ref("rooms/"+name).set({ passHash, createdAt: Date.now() });
+  document.getElementById("info").textContent = "部屋「"+name+"」を作成しました。chat.htmlから参加できます。";
+}
+</script>
+</body>
+</html>

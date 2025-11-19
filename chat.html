@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Chat</title>
+<style>
+body { font-family: sans-serif; margin:20px; background:#0f1223; color:#e8edf0; }
+#chatBox { border:1px solid #334169; height:300px; overflow-y:auto; padding:8px; margin:10px 0; background:#121632; }
+.msg { margin:6px 0; padding:6px; border-radius:6px; background:#1a1f3b; }
+.meta { font-size:12px; color:#94a3b8; }
+</style>
+</head>
+<body>
+<h2>チャット参加</h2>
+<label>部屋: <select id="roomSelect"></select></label><br>
+<label>パスワード: <input type="password" id="joinPass"></label><br>
+<label>ニックネーム: <input type="text" id="nickname"></label><br>
+<button onclick="joinRoom()">参加</button>
+<p id="info"></p>
+
+<div id="chatArea" style="display:none;">
+  <h3 id="roomTitle"></h3>
+  <div id="chatBox"></div>
+  <input type="text" id="msg" placeholder="メッセージ">
+  <button onclick="sendMsg()">送信</button>
+</div>
+
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script>
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  databaseURL: "https://YOUR_PROJECT-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "YOUR_PROJECT",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+async function sha256(text){
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+
+let currentRoom=null, nickname=null;
+
+async function loadRooms(){
+  const snap = await db.ref("rooms").get();
+  const rooms = snap.val()||{};
+  const sel = document.getElementById("roomSelect");
+  sel.innerHTML = Object.keys(rooms).map(r=>`<option value="${r}">${r}</option>`).join("");
+}
+loadRooms();
+
+async function joinRoom(){
+  const room = document.getElementById("roomSelect").value;
+  const pass = document.getElementById("joinPass").value;
+  nickname = document.getElementById("nickname").value.trim();
+  if(!room || !pass || !nickname){ document.getElementById("info").textContent="入力不足"; return; }
+  const snap = await db.ref("rooms/"+room).get();
+  if(!snap.exists()){ document.getElementById("info").textContent="部屋が存在しません"; return; }
+  const passHash = await sha256(pass);
+  if(snap.val().passHash!==passHash){ document.getElementById("info").textContent="パスワードが違います"; return; }
+  currentRoom=room;
+  document.getElementById("roomTitle").textContent="部屋: "+room;
+  document.getElementById("chatArea").style.display="block";
+  subscribeMessages(room);
+}
+
+function sendMsg(){
+  const text=document.getElementById("msg").value.trim();
+  if(!text) return;
+  db.ref("messages/"+currentRoom).push({nick:nickname,text,ts:Date.now()});
+  document.getElementById("msg").value="";
+}
+
+function subscribeMessages(room){
+  db.ref("messages/"+room).limitToLast(100).on("value",snap=>{
+    const data=snap.val()||{};
+    const list=Object.values(data).sort((a,b)=>a.ts-b.ts);
+    const box=document.getElementById("chatBox");
+    box.innerHTML=list.map(m=>{
+      const time=new Date(m.ts).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+      return `<div class="msg"><div class="meta">${m.nick} (${time})</div><div>${escapeHtml(m.text)}</div></div>`;
+    }).join("");
+    box.scrollTop=box.scrollHeight;
+  });
+}
+
+function escapeHtml(s){ return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+</script>
+</body>
+</html>
