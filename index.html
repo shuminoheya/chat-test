@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Realtime Chat (統合版)</title>
+<style>
+body { font-family: sans-serif; margin:20px; background:#0f1223; color:#e8edf0; }
+h2 { margin-top:0; }
+input, select, button { margin:5px; padding:8px; border-radius:6px; }
+button { cursor:pointer; }
+#chatBox { border:1px solid #334169; height:300px; overflow-y:auto; padding:8px; margin:10px 0; background:#121632; }
+.msg { margin:6px 0; padding:6px; border-radius:6px; background:#1a1f3b; }
+.meta { font-size:12px; color:#94a3b8; }
+</style>
+</head>
+<body>
+<h1>Realtime Chat (統合版)</h1>
+
+<!-- ナビゲーション -->
+<button onclick="showSection('admin')">部屋作成</button>
+<button onclick="showSection('chat')">チャット参加</button>
+
+<!-- Admin: 部屋作成 -->
+<section id="admin" style="display:block;">
+  <h2>部屋作成</h2>
+  <label>部屋名: <input type="text" id="roomName"></label><br>
+  <label>パスワード: <input type="password" id="roomPass"></label><br>
+  <button onclick="createRoom()">作成</button>
+  <p id="adminInfo"></p>
+</section>
+
+<!-- Chat: 参加＆チャット -->
+<section id="chat" style="display:none;">
+  <h2>チャット参加</h2>
+  <label>部屋: <select id="roomSelect"></select></label><br>
+  <label>パスワード: <input type="password" id="joinPass"></label><br>
+  <label>ニックネーム: <input type="text" id="nickname"></label><br>
+  <button onclick="joinRoom()">参加</button>
+  <p id="joinInfo"></p>
+
+  <div id="chatArea" style="display:none;">
+    <h3 id="roomTitle"></h3>
+    <div id="chatBox"></div>
+    <input type="text" id="msg" placeholder="メッセージ">
+    <button onclick="sendMsg()">送信</button>
+  </div>
+</section>
+
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script>
+/* 🔑 Firebase構成情報を必ず差し替えてください */
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+  projectId: "YOUR_PROJECT",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+/* ユーティリティ */
+const $ = id => document.getElementById(id);
+async function sha256(text){
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+function showSection(id){
+  $("admin").style.display = (id==="admin")?"block":"none";
+  $("chat").style.display = (id==="chat")?"block":"none";
+  if(id==="chat") loadRooms();
+}
+
+/* 部屋作成 */
+async function createRoom(){
+  const name = $("roomName").value.trim();
+  const pass = $("roomPass").value;
+  if(!name || !pass){ $("adminInfo").textContent="入力してください"; return; }
+  const passHash = await sha256(pass);
+  await db.ref("rooms/"+name).set({ passHash, createdAt: Date.now() });
+  $("adminInfo").textContent = "部屋「"+name+"」を作成しました。";
+  $("roomName").value=""; $("roomPass").value="";
+}
+
+/* 部屋一覧読み込み */
+async function loadRooms(){
+  const snap = await db.ref("rooms").get();
+  const rooms = snap.val()||{};
+  $("roomSelect").innerHTML = Object.keys(rooms).map(r=>`<option value="${r}">${r}</option>`).join("");
+}
+
+/* 参加 */
+let currentRoom=null, nickname=null;
+async function joinRoom(){
+  const room = $("roomSelect").value;
+  const pass = $("joinPass").value;
+  nickname = $("nickname").value.trim();
+  if(!room || !pass || !nickname){ $("joinInfo").textContent="入力不足"; return; }
+  const snap = await db.ref("rooms/"+room).get();
+  if(!snap.exists()){ $("joinInfo").textContent="部屋が存在しません"; return; }
+  const passHash = await sha256(pass);
+  if(snap.val().passHash!==passHash){ $("joinInfo").textContent="パスワードが違います"; return; }
+  currentRoom=room;
+  $("roomTitle").textContent="部屋: "+room;
+  $("chatArea").style.display="block";
+  subscribeMessages(room);
+}
+
+/* メッセージ送信 */
+function sendMsg(){
+  const text=$("msg").value.trim();
+  if(!text) return;
+  db.ref("messages/"+currentRoom).push({nick:nickname,text,ts:Date.now()});
+  $("msg").value="";
+}
+
+/* メッセージ購読 */
+function subscribeMessages(room){
+  db.ref("messages/"+room).limitToLast(100).on("value",snap=>{
+    const data=snap.val()||{};
+    const list=Object.values(data).sort((a,b)=>a.ts-b.ts);
+    $("chatBox").innerHTML=list.map(m=>{
+      const time=new Date(m.ts).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+      return `<div class="msg"><div class="meta">${m.nick} (${time})</div><div>${escapeHtml(m.text)}</div></div>`;
+    }).join("");
+    $("chatBox").scrollTop=$("chatBox").scrollHeight;
+  });
+}
+function escapeHtml(s){ return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+</script>
+</body>
+</html>
